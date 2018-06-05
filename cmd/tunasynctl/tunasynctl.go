@@ -140,8 +140,7 @@ func listWorkers(c *cli.Context) error {
 }
 
 func listJobs(c *cli.Context) error {
-	// FIXME: there should be an API on manager server side that return MirrorStatus list to tunasynctl
-	var jobs []tunasync.MirrorStatus
+	var jobs []tunasync.WebMirrorStatus
 	if c.Bool("all") {
 		_, err := tunasync.GetJSON(baseURL+listJobsPath, &jobs, client)
 		if err != nil {
@@ -158,10 +157,10 @@ func listJobs(c *cli.Context) error {
 				fmt.Sprintf("Usage Error: jobs command need at"+
 					" least one arguments or \"--all\" flag."), 1)
 		}
-		ans := make(chan []tunasync.MirrorStatus, len(args))
+		ans := make(chan []tunasync.WebMirrorStatus, len(args))
 		for _, workerID := range args {
 			go func(workerID string) {
-				var workerJobs []tunasync.MirrorStatus
+				var workerJobs []tunasync.WebMirrorStatus
 				_, err := tunasync.GetJSON(fmt.Sprintf("%s/workers/%s/jobs",
 					baseURL, workerID), &workerJobs, client)
 				if err != nil {
@@ -237,6 +236,52 @@ func updateMirrorSize(c *cli.Context) error {
 	return nil
 }
 
+func removeWorker(c *cli.Context) error {
+	args := c.Args()
+	if len(args) != 0 {
+		return cli.NewExitError("Usage: tunasynctl -w <worker-id>", 1)
+	}
+	workerID := c.String("worker")
+	if len(workerID) == 0 {
+		return cli.NewExitError("Please specify the <worker-id>", 1)
+	}
+	url := fmt.Sprintf("%s/workers/%s", baseURL, workerID)
+
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		logger.Panicf("Invalid HTTP Request: %s", err.Error())
+	}
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return cli.NewExitError(
+			fmt.Sprintf("Failed to send request to manager: %s", err.Error()), 1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return cli.NewExitError(
+				fmt.Sprintf("Failed to parse response: %s", err.Error()),
+				1)
+		}
+
+		return cli.NewExitError(fmt.Sprintf("Failed to correctly send"+
+			" command: HTTP status code is not 200: %s", body),
+			1)
+	}
+
+	res := map[string]string{}
+	err = json.NewDecoder(resp.Body).Decode(&res)
+	if res["message"] == "deleted" {
+		logger.Info("Successfully removed the worker")
+	} else {
+		logger.Info("Failed to remove the worker")
+	}
+	return nil
+}
+
 func flushDisabledJobs(c *cli.Context) error {
 	req, err := http.NewRequest("DELETE", baseURL+flushDisabledPath, nil)
 	if err != nil {
@@ -286,11 +331,16 @@ func cmdJob(cmd tunasync.CmdVerb) cli.ActionFunc {
 				"argument WORKER", 1)
 		}
 
+		options := map[string]bool{}
+		if c.Bool("force") {
+			options["force"] = true
+		}
 		cmd := tunasync.ClientCmd{
 			Cmd:      cmd,
 			MirrorID: mirrorID,
 			WorkerID: c.String("worker"),
 			Args:     argsList,
+			Options:  options,
 		}
 		resp, err := tunasync.PostJSON(baseURL+cmdPath, cmd, client)
 		if err != nil {
@@ -411,6 +461,11 @@ func main() {
 		},
 	}
 
+	forceStartFlag := cli.BoolFlag{
+		Name:  "force, f",
+		Usage: "Override the concurrent limit",
+	}
+
 	app.Commands = []cli.Command{
 		{
 			Name:  "list",
@@ -437,6 +492,18 @@ func main() {
 			Action: initializeWrapper(listWorkers),
 		},
 		{
+			Name:  "rm-worker",
+			Usage: "Remove a worker",
+			Flags: append(
+				commonFlags,
+				cli.StringFlag{
+					Name:  "worker, w",
+					Usage: "worker-id of the worker to be removed",
+				},
+			),
+			Action: initializeWrapper(removeWorker),
+		},
+		{
 			Name:  "set-size",
 			Usage: "Set mirror size",
 			Flags: append(
@@ -451,7 +518,7 @@ func main() {
 		{
 			Name:   "start",
 			Usage:  "Start a job",
-			Flags:  append(commonFlags, cmdFlags...),
+			Flags:  append(append(commonFlags, cmdFlags...), forceStartFlag),
 			Action: initializeWrapper(cmdJob(tunasync.CmdStart)),
 		},
 		{

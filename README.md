@@ -19,7 +19,7 @@ Pre-built binary for Linux x86_64 is available at [Github releases](https://gith
 ```
 # Architecture
 
-- Manager: Centural instance on status and job management
+- Manager: Central instance for status and job management
 - Worker: Runs mirror jobs
 
 +------------+ +---+                  +---+
@@ -47,12 +47,12 @@ PreSyncing           Syncing                               Success
 			   |                                   |
 			   |      +-----------------+          | Failed
 			   +------+    post-fail    |<---------+
-					  +-----------------+
+			          +-----------------+
 ```
 
 ## Generate Self-Signed Certificate
 
-Fisrt, create root CA
+First, create root CA
 
 ```
 openssl genrsa -out rootCA.key 2048

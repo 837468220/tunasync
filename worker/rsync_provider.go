@@ -11,7 +11,7 @@ type rsyncConfig struct {
 	rsyncCmd                                     string
 	upstreamURL, username, password, excludeFile string
 	workingDir, logDir, logFile                  string
-	useIPv6                                      bool
+	useIPv6, useIPv4                             bool
 	interval                                     time.Duration
 }
 
@@ -49,6 +49,8 @@ func newRsyncProvider(c rsyncConfig) (*rsyncProvider, error) {
 
 	if c.useIPv6 {
 		options = append(options, "-6")
+	} else if c.useIPv4 {
+		options = append(options, "-4")
 	}
 
 	if c.excludeFile != "" {
@@ -79,6 +81,12 @@ func (p *rsyncProvider) Run() error {
 }
 
 func (p *rsyncProvider) Start() error {
+	p.Lock()
+	defer p.Unlock()
+
+	if p.IsRunning() {
+		return errors.New("provider is currently running")
+	}
 
 	env := map[string]string{}
 	if p.username != "" {
@@ -92,7 +100,7 @@ func (p *rsyncProvider) Start() error {
 	command = append(command, p.upstreamURL, p.WorkingDir())
 
 	p.cmd = newCmdJob(p, command, p.WorkingDir(), env)
-	if err := p.prepareLogFile(); err != nil {
+	if err := p.prepareLogFile(false); err != nil {
 		return err
 	}
 
